@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Groq Coder</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width:100%; height:100%; background:transparent; font-family:'Segoe UI',Arial,sans-serif; overflow:hidden; color:#e2e8f0; user-select:none; }
+
+    /* Drag bar */
+    #drag-bar { position:fixed; top:0; left:0; right:0; height:30px; -webkit-app-region:drag; background:rgba(8,10,20,0.9); display:flex; align-items:center; justify-content:space-between; padding:0 12px; z-index:10000; border-bottom:1px solid rgba(99,179,237,0.15); }
+    #drag-bar .title { font-size:11px; color:#63b3ed; font-weight:700; letter-spacing:1.8px; text-transform:uppercase; }
+    #drag-bar .pills { display:flex; gap:6px; align-items:center; }
+    .pill { font-size:10px; padding:2px 8px; border-radius:10px; border:1px solid; letter-spacing:0.4px; font-weight:600; }
+    .pill-model { color:#63b3ed; border-color:rgba(99,179,237,0.3); background:rgba(99,179,237,0.08); }
+    .pill-voice { color:#68d391; border-color:rgba(104,211,145,0.3); background:rgba(104,211,145,0.08); display:none; }
+    .pill-voice.on { display:inline-block; }
+    #voice-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#68d391; margin-right:4px; animation:pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+    /* Hint bar */
+    #hint-bar { position:fixed; top:30px; left:0; right:0; background:rgba(6,8,16,0.9); color:#718096; font-size:11px; padding:4px 14px; border-bottom:1px solid rgba(255,255,255,0.04); z-index:9999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #hint-bar .k { color:#63b3ed; font-weight:600; background:rgba(99,179,237,0.1); padding:1px 4px; border-radius:3px; }
+
+    /* Main */
+    #main { position:fixed; top:52px; left:0; right:0; bottom:0; display:flex; overflow:hidden; }
+
+    /* Left panel */
+    #left-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; border-right:1px solid rgba(255,255,255,0.05); }
+    #tabs { display:flex; background:rgba(8,10,18,0.75); border-bottom:1px solid rgba(255,255,255,0.06); padding:0 8px; }
+    .tab { padding:7px 14px; font-size:12px; color:#718096; cursor:pointer; border-bottom:2px solid transparent; -webkit-app-region:no-drag; transition:color 0.15s; }
+    .tab.active { color:#63b3ed; border-bottom-color:#63b3ed; }
+    .tab:hover:not(.active) { color:#a0aec0; }
+    .pane { display:none; flex:1; flex-direction:column; overflow:hidden; }
+    .pane.active { display:flex; }
+
+    /* Idle */
+    #pane-coding { align-items:center; justify-content:center; gap:12px; }
+    #pane-coding .logo { font-size:34px; filter:drop-shadow(0 0 10px rgba(99,179,237,0.4)); }
+    #pane-coding h2 { font-size:16px; color:#bee3f8; font-weight:600; }
+    #pane-coding p { font-size:12px; color:#4a5568; text-align:center; line-height:1.8; max-width:360px; }
+
+    /* Processing */
+    #pane-processing { align-items:center; justify-content:center; gap:14px; }
+    .spinner { width:40px; height:40px; border:3px solid rgba(99,179,237,0.12); border-top-color:#63b3ed; border-radius:50%; animation:spin 0.75s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    #processing-msg { color:#90cdf4; font-size:14px; }
+    #ocr-status { font-size:11px; color:#4a5568; font-style:italic; max-width:420px; text-align:center; }
+
+    /* Result */
+    #pane-result { flex-direction:column; overflow:hidden; }
+    #result-body { flex:1; overflow-y:auto; padding:16px 20px; background:rgba(8,10,18,0.5); }
+    #result-body::-webkit-scrollbar{width:5px} #result-body::-webkit-scrollbar-thumb{background:rgba(99,179,237,0.2);border-radius:3px}
+    #result-body h1,#result-body h2,#result-body h3{color:#bee3f8;margin:14px 0 6px;border-bottom:1px solid rgba(99,179,237,0.1);padding-bottom:3px}
+    #result-body p{margin:0 0 9px;line-height:1.65;color:#cbd5e0}
+    #result-body ul,#result-body ol{padding-left:18px;margin-bottom:9px}
+    #result-body li{margin-bottom:3px;color:#cbd5e0;line-height:1.6}
+    #result-body strong{color:#e2e8f0}
+    #result-body blockquote{border-left:3px solid #63b3ed;margin:6px 0;padding:5px 10px;color:#a0aec0;background:rgba(99,179,237,0.04);border-radius:0 5px 5px 0}
+    pre{background:rgba(16,20,32,0.98);border:1px solid rgba(99,179,237,0.1);border-radius:6px;padding:12px 14px;overflow-x:auto;margin:8px 0}
+    pre code{background:none;color:#e2e8f0;font-size:12.5px;padding:0}
+    code{font-family:'Fira Code',Consolas,monospace;background:rgba(40,50,70,0.7);color:#90cdf4;padding:1px 5px;border-radius:3px;font-size:12.5px}
+
+    /* Follow-up bar */
+    #followup-bar { display:flex; align-items:center; gap:8px; background:rgba(6,8,16,0.9); border-top:1px solid rgba(255,255,255,0.06); padding:7px 10px; }
+    #followup-input { flex:1; background:rgba(18,22,36,0.95); border:1px solid rgba(99,179,237,0.18); border-radius:5px; color:#e2e8f0; font-size:12.5px; padding:6px 10px; outline:none; -webkit-app-region:no-drag; }
+    #followup-input:focus{border-color:rgba(99,179,237,0.45)}
+    #followup-input::placeholder{color:#4a5568}
+    #followup-btn { background:rgba(99,179,237,0.12); border:1px solid rgba(99,179,237,0.25); color:#63b3ed; border-radius:5px; padding:6px 12px; font-size:12px; cursor:pointer; -webkit-app-region:no-drag; }
+    #followup-btn:hover{background:rgba(99,179,237,0.22)}
+
+    /* ── VOICE PANEL ────────────────────────────────────────────────── */
+    #voice-panel { width:0; overflow:hidden; display:flex; flex-direction:column; background:rgba(6,8,18,0.65); transition:width 0.3s ease; }
+    #voice-panel.open { width:320px; border-left:1px solid rgba(104,211,145,0.12); }
+
+    #voice-header { padding:10px 12px; border-bottom:1px solid rgba(104,211,145,0.1); background:rgba(6,8,16,0.85); }
+    #voice-title-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    #voice-title-row span { font-size:12px; color:#68d391; font-weight:600; letter-spacing:0.5px; }
+
+    /* Source selector */
+    #source-row { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+    #source-row label { font-size:10px; color:#718096; min-width:44px; }
+    #audio-source-select { flex:1; background:rgba(18,22,36,0.95); border:1px solid rgba(99,179,237,0.2); color:#e2e8f0; font-size:11px; padding:3px 6px; border-radius:4px; outline:none; -webkit-app-region:no-drag; }
+    #audio-source-select option { background:#1a2030; }
+    #refresh-sources { background:rgba(99,179,237,0.1); border:1px solid rgba(99,179,237,0.2); color:#63b3ed; border-radius:4px; padding:3px 8px; font-size:10px; cursor:pointer; -webkit-app-region:no-drag; }
+
+    /* Controls row */
+    #voice-controls { display:flex; gap:6px; align-items:center; }
+    .vbtn { padding:5px 11px; border-radius:16px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid; transition:all 0.2s; -webkit-app-region:no-drag; }
+    #btn-start { color:#68d391; border-color:rgba(104,211,145,0.4); background:rgba(104,211,145,0.1); }
+    #btn-start:hover { background:rgba(104,211,145,0.2); }
+    #btn-start:disabled { opacity:0.4; cursor:not-allowed; }
+    #btn-stop { color:#fc8181; border-color:rgba(252,129,129,0.35); background:rgba(252,129,129,0.08); display:none; }
+    #btn-stop.show { display:inline-block; }
+    #btn-send-now { color:#f6e05e; border-color:rgba(246,224,94,0.35); background:rgba(246,224,94,0.08); display:none; }
+    #btn-send-now.show { display:inline-block; }
+    #btn-clear-voice { color:#a0aec0; border-color:rgba(160,174,192,0.2); background:transparent; }
+    #btn-clear-voice:hover { background:rgba(160,174,192,0.08); }
+
+    /* VAD meter */
+    #vad-row { display:flex; align-items:center; gap:8px; padding:6px 12px; }
+    #vad-canvas { flex:1; height:32px; border-radius:4px; background:rgba(16,20,32,0.8); }
+    #vad-label { font-size:10px; min-width:52px; text-align:right; }
+    #vad-label.speaking { color:#68d391; }
+    #vad-label.silence  { color:#4a5568; }
+
+    /* Voice status */
+    #voice-status { padding:4px 12px 6px; font-size:11px; color:#4a5568; font-style:italic; min-height:22px; }
+
+    /* Voice log */
+    #voice-log { flex:1; overflow-y:auto; padding:8px 10px; display:flex; flex-direction:column; gap:10px; }
+    #voice-log::-webkit-scrollbar{width:4px} #voice-log::-webkit-scrollbar-thumb{background:rgba(104,211,145,0.12);border-radius:2px}
+    .voice-entry { display:flex; flex-direction:column; gap:5px; }
+    .voice-q { background:rgba(104,211,145,0.06); border-left:2px solid rgba(104,211,145,0.35); padding:6px 10px; border-radius:0 5px 5px 0; font-size:11.5px; color:#a0f0b8; }
+    .voice-q .lbl { font-size:9px; font-weight:700; letter-spacing:1px; color:#68d391; margin-bottom:3px; }
+    .voice-a { background:rgba(99,179,237,0.06); border-left:2px solid rgba(99,179,237,0.28); padding:8px 10px; border-radius:0 5px 5px 0; font-size:12px; color:#cbd5e0; line-height:1.6; }
+    .voice-a .lbl { font-size:9px; font-weight:700; letter-spacing:1px; color:#63b3ed; margin-bottom:4px; }
+    .voice-a pre{font-size:11.5px;padding:8px 10px} .voice-a code{font-size:11.5px}
+    .thinking { display:flex; align-items:center; gap:6px; color:#4a5568; font-size:11px; padding:5px 10px; }
+    .mini-spin { width:13px; height:13px; border:2px solid rgba(99,179,237,0.15); border-top-color:#63b3ed; border-radius:50%; animation:spin 0.7s linear infinite; }
+    .err-entry { background:rgba(245,101,101,0.07); border-left:2px solid #fc8181; padding:6px 10px; border-radius:0 5px 5px 0; font-size:11px; color:#fc8181; }
+
+    .error-box { background:rgba(245,101,101,0.07); border-left:3px solid #fc8181; border-radius:0 6px 6px 0; padding:12px 14px; color:#fc8181; margin:8px 0; }
+    .error-box small { display:block; color:#a0aec0; margin-top:5px; font-size:11px; }
+    body.mini #main, body.mini #hint-bar { display:none; }
+    body.mini #drag-bar { border-radius:0 0 8px 8px; }
+    /* Opacity is applied here (not via window.setOpacity) so scroll/clicks always work */
+    body { transition: opacity 0.2s ease; }
+  </style>
+</head>
+<body>
+
+<div id="drag-bar">
+  <span class="title">⚡ Groq Coder</span>
+  <div class="pills">
+    <span class="pill pill-voice" id="voice-pill"><span id="voice-dot"></span>LIVE</span>
+    <span class="pill pill-model">llama-3.3-70b-versatile</span>
+  </div>
+</div>
+
+<div id="hint-bar">Loading…</div>
+
+<div id="main">
+  <!-- LEFT -->
+  <div id="left-panel">
+    <div id="tabs">
+      <div class="tab active" data-tab="coding">Coding</div>
+      <div class="tab" data-tab="result">Answer</div>
+      <div class="tab" data-tab="followup">Follow-up</div>
+    </div>
+
+    <div class="pane active" id="pane-coding">
+      <div class="logo">🧠</div>
+      <h2>Groq Coder</h2>
+      <p>
+        <b>Ctrl+Shift+S</b> — snap screen &amp; solve<br>
+        <b>Ctrl+Shift+A</b> — add page<br>
+        <b>Ctrl+Shift+V</b> — toggle voice panel<br>
+        <b>Ctrl+Shift+D</b> — preview raw OCR
+      </p>
+    </div>
+
+    <div class="pane" id="pane-processing">
+      <div class="spinner"></div>
+      <div id="processing-msg">Working…</div>
+      <div id="ocr-status"></div>
+    </div>
+
+    <div class="pane" id="pane-result">
+      <div id="result-body"></div>
+    </div>
+
+    <div class="pane" id="pane-followup" style="align-items:center;justify-content:center;">
+      <p style="font-size:12px;color:#4a5568">Ask anything about the current solution</p>
+    </div>
+
+    <div id="followup-bar" style="display:none">
+      <input id="followup-input" type="text" placeholder="Ask a follow-up…"/>
+      <button id="followup-btn">Send</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: Voice panel -->
+  <div id="voice-panel">
+    <div id="voice-header">
+      <div id="voice-title-row">
+        <span>🎙 Voice — System Audio</span>
+      </div>
+
+      <!-- Audio source selector -->
+      <div id="source-row">
+        <label>Source:</label>
+        <select id="audio-source-select">
+          <option value="mic">🎤 Microphone</option>
+          <option value="loopback" selected>🔊 System Audio (loopback)</option>
+        </select>
+        <button id="refresh-sources">↺</button>
+      </div>
+
+      <!-- Controls -->
+      <div id="voice-controls">
+        <button class="vbtn" id="btn-start">▶ Start</button>
+        <button class="vbtn" id="btn-stop">■ Stop</button>
+        <button class="vbtn" id="btn-send-now">⚡ Send Now</button>
+        <button class="vbtn" id="btn-clear-voice">✕ Clear</button>
+      </div>
+    </div>
+
+    <!-- VAD meter -->
+    <div id="vad-row">
+      <canvas id="vad-canvas" width="220" height="32"></canvas>
+      <div id="vad-label" class="silence">silence</div>
+    </div>
+
+    <div id="voice-status">Select source and press Start…</div>
+    <div id="voice-log"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+const { ipcRenderer } = require('electron');
+marked.use({ breaks: true, gfm: true });
+
+// ── Elements ──────────────────────────────────────────────────────────────────
+const hintBar       = document.getElementById('hint-bar');
+const tabs          = document.querySelectorAll('.tab');
+const pCoding       = document.getElementById('pane-coding');
+const pProcessing   = document.getElementById('pane-processing');
+const pResult       = document.getElementById('pane-result');
+const pFollowup     = document.getElementById('pane-followup');
+const processingMsg = document.getElementById('processing-msg');
+const ocrStatus     = document.getElementById('ocr-status');
+const resultBody    = document.getElementById('result-body');
+const followupBar   = document.getElementById('followup-bar');
+const followupInput = document.getElementById('followup-input');
+const followupBtn   = document.getElementById('followup-btn');
+
+const voicePanel    = document.getElementById('voice-panel');
+const voicePill     = document.getElementById('voice-pill');
+const sourceSelect  = document.getElementById('audio-source-select');
+const refreshBtn    = document.getElementById('refresh-sources');
+const btnStart      = document.getElementById('btn-start');
+const btnStop       = document.getElementById('btn-stop');
+const btnSendNow    = document.getElementById('btn-send-now');
+const btnClearVoice = document.getElementById('btn-clear-voice');
+const vadCanvas     = document.getElementById('vad-canvas');
+const vadLabel      = document.getElementById('vad-label');
+const voiceStatus   = document.getElementById('voice-status');
+const voiceLog      = document.getElementById('voice-log');
+
+const DEFAULT_HINT_HTML =
+  '<span class="k">S</span> snap &nbsp;<span class="k">A</span> add page &nbsp;' +
+  '<span class="k">V</span> voice &nbsp;<span class="k">D</span> OCR &nbsp;' +
+  '<span class="k">R</span> reset &nbsp;<span class="k">W</span> hide &nbsp;' +
+  '<span class="k">E</span> opacity &nbsp;<span class="k">M</span> mini &nbsp;' +
+  '<span class="k">←→↑↓</span> move';
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+let voicePanelOpen = false;
+
+function showLeftPane(name) {
+  [pCoding, pProcessing, pResult, pFollowup].forEach(p => p.classList.remove('active'));
+  const map = { coding: pCoding, processing: pProcessing, result: pResult, followup: pFollowup };
+  if (map[name]) map[name].classList.add('active');
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+}
+
+tabs.forEach(t => t.addEventListener('click', () => showLeftPane(t.dataset.tab)));
+
+// Follow-up
+function sendFollowUp() {
+  const q = followupInput.value.trim(); if (!q) return;
+  followupInput.value = '';
+  ipcRenderer.send('follow-up', q);
+}
+followupBtn.addEventListener('click', sendFollowUp);
+followupInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendFollowUp(); });
+
+// ── IPC: coding ───────────────────────────────────────────────────────────────
+ipcRenderer.on('hint', (_, m) => { hintBar.textContent = m; });
+ipcRenderer.on('status', (_, m) => { ocrStatus.textContent = m; processingMsg.textContent = 'Reading screenshot…'; showLeftPane('processing'); });
+ipcRenderer.on('processing', (_, m) => { processingMsg.textContent = m; ocrStatus.textContent = ''; showLeftPane('processing'); });
+ipcRenderer.on('result', (_, md) => {
+  resultBody.innerHTML = marked.parse(md); resultBody.scrollTop = 0;
+  showLeftPane('result'); followupBar.style.display = 'flex';
+  hintBar.innerHTML = '<span class="k">R</span> reset &nbsp;<span class="k">W</span> hide — click Follow-up tab for questions';
+});
+ipcRenderer.on('followup-result', (_, md) => {
+  const hr = document.createElement('hr'); hr.style.cssText = 'border-color:rgba(99,179,237,0.12);margin:14px 0';
+  const div = document.createElement('div'); div.innerHTML = marked.parse(md);
+  resultBody.appendChild(hr); resultBody.appendChild(div); resultBody.scrollTop = resultBody.scrollHeight;
+  showLeftPane('result'); followupBar.style.display = 'flex';
+});
+ipcRenderer.on('error', (_, m) => {
+  resultBody.innerHTML = `<div class="error-box"><strong>Error:</strong> ${m}<small>Ctrl+Shift+R to reset.</small></div>`;
+  showLeftPane('result'); followupBar.style.display = 'none';
+});
+ipcRenderer.on('reset', () => {
+  resultBody.innerHTML = ''; followupBar.style.display = 'none';
+  showLeftPane('coding'); hintBar.innerHTML = DEFAULT_HINT_HTML;
+  stopCapture(); clearVoiceLog(); ipcRenderer.send('voice-reset');
+});
+ipcRenderer.on('hide-ui', () => {});
+ipcRenderer.on('show-ui', () => {});
+ipcRenderer.on('minimize-ui', () => document.body.classList.add('mini'));
+ipcRenderer.on('restore-ui', () => document.body.classList.remove('mini'));
+// CSS opacity — keeps pointer events alive unlike window.setOpacity()
+ipcRenderer.on('set-opacity', (_, val) => { document.body.style.opacity = val; });
+
+// ── Toggle voice panel from shortcut ─────────────────────────────────────────
+ipcRenderer.on('toggle-voice', () => {
+  voicePanelOpen = !voicePanelOpen;
+  voicePanel.classList.toggle('open', voicePanelOpen);
+  if (!voicePanelOpen) stopCapture();
+});
+
+// ── IPC: voice results ────────────────────────────────────────────────────────
+ipcRenderer.on('voice-transcribing', () => {
+  voiceStatus.textContent = 'Transcribing with Whisper…';
+  appendThinking();
+});
+ipcRenderer.on('voice-processing', (_, transcript) => {
+  voiceStatus.textContent = 'Groq is thinking…';
+  removeThinking(); appendQuestion(transcript); appendThinking();
+});
+ipcRenderer.on('voice-result', (_, { question, answer }) => {
+  removeThinking(); appendAnswer(answer);
+  voiceStatus.textContent = isCapturing ? 'Listening for next question…' : 'Done.';
+  restartRecording(); // go back to capturing next utterance
+});
+ipcRenderer.on('voice-error', (_, m) => {
+  removeThinking();
+  voiceStatus.textContent = 'Error — ' + m;
+  appendErrEntry(m);
+  restartRecording();
+});
+ipcRenderer.on('voice-idle', () => {
+  voiceStatus.textContent = 'Heard nothing useful — still listening…';
+  restartRecording();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUDIO CAPTURE + VAD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let audioCtx = null, analyser = null, animFrame = null;
+let mediaRecorder = null, recordedChunks = [], mimeType = '';
+let isCapturing = false, isProcessing = false;
+let recordingStream = null;
+
+// VAD state
+const VAD = {
+  // Adaptive noise floor — starts at 0, learns from environment
+  noiseFloor: 0,
+  NOISE_LEARN_RATE: 0.02,     // how fast noise floor adapts upward (slow)
+  NOISE_DECAY_RATE: 0.005,    // how fast it decays downward when silent
+
+  SPEECH_THRESHOLD_MULT: 2.8, // speech detected when RMS > noiseFloor * this
+  SPEECH_THRESHOLD_ABS: 0.01, // absolute minimum RMS for speech (ignore very quiet)
+  SILENCE_FRAMES: 0,
+  SPEECH_FRAMES: 0,
+  SILENCE_NEEDED: 100,   // ~2s of silence at 50fps before submitting
+  SPEECH_NEEDED: 6,     // ~120ms of speech before we consider it started
+  hasSpeech: false,
+  speechStarted: false,
+};
+
+function rms(dataArray) {
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    const v = (dataArray[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / dataArray.length);
+}
+
+// Populate source selector with loopback desktopCapturer sources + mic
+async function loadSources() {
+  const currentVal = sourceSelect.value;
+  // Remove all except mic + loopback
+  while (sourceSelect.options.length > 0) sourceSelect.remove(0);
+  sourceSelect.add(new Option('🎤 Microphone', 'mic'));
+  sourceSelect.add(new Option('🔊 System Audio (loopback)', 'loopback'));
+
+  try {
+    const sources = await ipcRenderer.invoke('get-desktop-sources');
+    sources.forEach(s => {
+      sourceSelect.add(new Option('🖥 ' + s.name.substring(0, 28), 'desktop:' + s.id));
+    });
+  } catch (_) {}
+
+  // Restore selection
+  const opt = [...sourceSelect.options].find(o => o.value === currentVal);
+  if (opt) sourceSelect.value = currentVal;
+  else sourceSelect.value = 'loopback';
+}
+
+refreshBtn.addEventListener('click', loadSources);
+loadSources();
+
+// Get audio stream based on selected source
+async function getAudioStream() {
+  const src = sourceSelect.value;
+
+  if (src === 'mic') {
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  }
+
+  if (src === 'loopback') {
+    // WASAPI loopback via desktopCapturer — captures system audio output
+    // On Windows this captures everything playing through speakers/headphones
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+          }
+        },
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            maxWidth: 1,
+            maxHeight: 1,
+            maxFrameRate: 1,
+          }
+        }
+      });
+      // Remove the dummy video track — we only want audio
+      stream.getVideoTracks().forEach(t => t.stop());
+      const audioOnly = new MediaStream(stream.getAudioTracks());
+      return audioOnly;
+    } catch (e) {
+      throw new Error('Loopback failed: ' + e.message + '. Try selecting Microphone instead.');
+    }
+  }
+
+  if (src.startsWith('desktop:')) {
+    const sourceId = src.replace('desktop:', '');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } },
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxWidth: 1, maxHeight: 1, maxFrameRate: 1 } }
+    });
+    stream.getVideoTracks().forEach(t => t.stop());
+    return new MediaStream(stream.getAudioTracks());
+  }
+
+  throw new Error('Unknown source: ' + src);
+}
+
+// Start full capture session
+async function startCapture() {
+  if (isCapturing) return;
+  isCapturing = true;
+  btnStart.disabled = true;
+  btnStop.classList.add('show');
+  btnSendNow.classList.add('show');
+  voicePill.classList.add('on');
+  voiceStatus.textContent = 'Starting…';
+
+  // Reset VAD
+  VAD.noiseFloor = 0; VAD.SILENCE_FRAMES = 0; VAD.SPEECH_FRAMES = 0;
+  VAD.hasSpeech = false; VAD.speechStarted = false;
+
+  try {
+    recordingStream = await getAudioStream();
+    setupAnalyser(recordingStream);
+    beginRecording(recordingStream);
+    voiceStatus.textContent = 'Listening — calibrating noise floor…';
+    setTimeout(() => {
+      if (isCapturing) voiceStatus.textContent = 'Listening — waiting for speech…';
+    }, 2500);
+  } catch (e) {
+    voiceStatus.textContent = 'Error: ' + e.message;
+    isCapturing = false;
+    btnStart.disabled = false;
+    btnStop.classList.remove('show');
+    btnSendNow.classList.remove('show');
+    voicePill.classList.remove('on');
+  }
+}
+
+function stopCapture() {
+  isCapturing = false;
+  btnStart.disabled = false;
+  btnStop.classList.remove('show');
+  btnSendNow.classList.remove('show');
+  voicePill.classList.remove('on');
+  vadLabel.textContent = 'off'; vadLabel.className = 'silence';
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  if (recordingStream) {
+    recordingStream.getTracks().forEach(t => t.stop());
+    recordingStream = null;
+  }
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+  analyser = null; mediaRecorder = null;
+  voiceStatus.textContent = 'Stopped.';
+}
+
+// Called after a segment is processed — restart recording
+function restartRecording() {
+  if (!isCapturing || !recordingStream) return;
+  isProcessing = false;
+  VAD.SILENCE_FRAMES = 0; VAD.SPEECH_FRAMES = 0;
+  VAD.hasSpeech = false; VAD.speechStarted = false;
+  recordedChunks = [];
+  beginRecording(recordingStream);
+  voiceStatus.textContent = 'Listening — waiting for speech…';
+}
+
+// Begin a MediaRecorder chunk
+function beginRecording(stream) {
+  if (!isCapturing) return;
+  recordedChunks = [];
+  const candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
+  mimeType = candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const opts = mimeType ? { mimeType, audioBitsPerSecond: 64000 } : {};
+  try {
+    mediaRecorder = new MediaRecorder(stream, opts);
+  } catch (e) {
+    mediaRecorder = new MediaRecorder(stream);
+    mimeType = mediaRecorder.mimeType || 'audio/webm';
+  }
+  mediaRecorder.ondataavailable = e => { if (e.data?.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder.start(100);
+}
+
+// Manually submit current buffer
+function submitCurrentBuffer() {
+  if (!recordedChunks.length || isProcessing) return;
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.pause();
+  isProcessing = true;
+  submitAudio();
+}
+
+async function submitAudio() {
+  if (!recordedChunks.length) { if (isCapturing) restartRecording(); return; }
+  const blob = new Blob(recordedChunks, { type: mimeType || 'audio/webm' });
+  if (blob.size < 2000) { if (isCapturing) restartRecording(); return; }
+  const ab = await blob.arrayBuffer();
+  ipcRenderer.send('audio-blob', { buffer: Array.from(new Uint8Array(ab)), mimeType: mimeType || 'audio/webm' });
+}
+
+// ── VAD loop ──────────────────────────────────────────────────────────────────
+function setupAnalyser(stream) {
+  audioCtx = new AudioContext();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.6;
+  const src = audioCtx.createMediaStreamSource(stream);
+  src.connect(analyser);
+  runVAD();
+  drawVAD();
+}
+
+function runVAD() {
+  if (!isCapturing || !analyser) return;
+  const buf = new Uint8Array(analyser.fftSize);
+
+  function tick() {
+    if (!isCapturing || !analyser) return;
+    requestAnimationFrame(tick);
+    if (isProcessing) return; // don't make decisions while processing
+
+    analyser.getByteTimeDomainData(buf);
+    const level = rms(buf);
+
+    // Adaptive noise floor: rises slowly toward current level when level is low,
+    // meaning it learns what "background" sounds like
+    if (level < VAD.noiseFloor * 1.5 || VAD.noiseFloor < 0.002) {
+      VAD.noiseFloor += (level - VAD.noiseFloor) * VAD.NOISE_LEARN_RATE;
+    }
+    // Noise floor decays down very slowly
+    VAD.noiseFloor = Math.max(0.001, VAD.noiseFloor - VAD.NOISE_DECAY_RATE * 0.001);
+
+    const speechThreshold = Math.max(
+      VAD.SPEECH_THRESHOLD_ABS,
+      VAD.noiseFloor * VAD.SPEECH_THRESHOLD_MULT
+    );
+    const isSpeech = level > speechThreshold;
+
+    if (isSpeech) {
+      VAD.SPEECH_FRAMES++;
+      VAD.SILENCE_FRAMES = 0;
+      if (VAD.SPEECH_FRAMES >= VAD.SPEECH_NEEDED && !VAD.speechStarted) {
+        VAD.speechStarted = true;
+        VAD.hasSpeech = true;
+        vadLabel.textContent = 'SPEECH'; vadLabel.className = 'speaking';
+        voiceStatus.textContent = 'Detecting speech…';
+      }
+    } else {
+      VAD.SPEECH_FRAMES = 0;
+      VAD.SILENCE_FRAMES++;
+      if (VAD.speechStarted) {
+        vadLabel.textContent = 'silence…'; vadLabel.className = 'silence';
+      }
+      // Enough silence after speech → submit
+      if (VAD.hasSpeech && VAD.speechStarted && VAD.SILENCE_FRAMES >= VAD.SILENCE_NEEDED) {
+        VAD.hasSpeech = false; VAD.speechStarted = false; VAD.SILENCE_FRAMES = 0;
+        isProcessing = true;
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+          mediaRecorder.onstop = () => submitAudio();
+        }
+        voiceStatus.textContent = 'Speech ended — sending to Whisper…';
+      }
+    }
+  }
+  tick();
+}
+
+// ── Waveform / level meter ────────────────────────────────────────────────────
+function drawVAD() {
+  if (!analyser) return;
+  const ctx = vadCanvas.getContext('2d');
+  const W = vadCanvas.width, H = vadCanvas.height;
+  const buf = new Uint8Array(analyser.fftSize);
+
+  function frame() {
+    animFrame = requestAnimationFrame(frame);
+    if (!analyser) return;
+    analyser.getByteTimeDomainData(buf);
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw waveform
+    ctx.beginPath();
+    ctx.strokeStyle = VAD.speechStarted ? 'rgba(104,211,145,0.8)' : 'rgba(99,179,237,0.35)';
+    ctx.lineWidth = 1.5;
+    const step = W / buf.length;
+    for (let i = 0; i < buf.length; i++) {
+      const y = ((buf[i] - 128) / 128) * (H / 2) + H / 2;
+      i === 0 ? ctx.moveTo(i * step, y) : ctx.lineTo(i * step, y);
+    }
+    ctx.stroke();
+
+    // Draw noise floor indicator
+    const noiseY = H / 2 - (VAD.noiseFloor * VAD.SPEECH_THRESHOLD_MULT) * (H / 2) * 10;
+    ctx.strokeStyle = 'rgba(246,224,94,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(0, noiseY); ctx.lineTo(W, noiseY);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  frame();
+}
+
+// ── Button handlers ───────────────────────────────────────────────────────────
+btnStart.addEventListener('click', () => startCapture());
+btnStop.addEventListener('click',  () => stopCapture());
+btnSendNow.addEventListener('click', () => {
+  if (!isCapturing) return;
+  isProcessing = true;
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    mediaRecorder.onstop = () => submitAudio();
+  } else {
+    submitAudio();
+  }
+  voiceStatus.textContent = 'Sending manually…';
+});
+btnClearVoice.addEventListener('click', () => {
+  clearVoiceLog(); ipcRenderer.send('voice-reset');
+});
+
+// ── Voice log helpers ─────────────────────────────────────────────────────────
+function clearVoiceLog() { voiceLog.innerHTML = ''; }
+function appendQuestion(text) {
+  const el = document.createElement('div'); el.className = 'voice-entry';
+  el.innerHTML = `<div class="voice-q"><div class="lbl">INTERVIEWER</div>${escHtml(text)}</div>`;
+  voiceLog.appendChild(el); voiceLog.scrollTop = voiceLog.scrollHeight;
+}
+function appendAnswer(md) {
+  const el = document.createElement('div'); el.className = 'voice-a';
+  el.innerHTML = `<div class="lbl">YOU</div>` + marked.parse(md);
+  voiceLog.appendChild(el); voiceLog.scrollTop = voiceLog.scrollHeight;
+}
+function appendThinking() {
+  const el = document.createElement('div'); el.className = 'thinking'; el.id = 'thinking-el';
+  el.innerHTML = '<div class="mini-spin"></div> Thinking…';
+  voiceLog.appendChild(el); voiceLog.scrollTop = voiceLog.scrollHeight;
+}
+function removeThinking() { document.getElementById('thinking-el')?.remove(); }
+function appendErrEntry(m) {
+  const el = document.createElement('div'); el.className = 'err-entry'; el.textContent = m;
+  voiceLog.appendChild(el); voiceLog.scrollTop = voiceLog.scrollHeight;
+}
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+hintBar.innerHTML = DEFAULT_HINT_HTML;
+showLeftPane('coding');
+</script>
+</body>
+</html>
