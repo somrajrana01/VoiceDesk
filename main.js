@@ -9,7 +9,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 // DO NOT add single-process — breaks packaged exe
 
 const path = require('path');
-const screenshot = require('screenshot-desktop');
+// screenshot-desktop removed — using Electron desktopCapturer instead
 const fs = require('fs');
 const https = require('https');
 const { execFile } = require('child_process');
@@ -101,12 +101,26 @@ function runOCR(imagePath) {
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 const CODING_SYSTEM =
-  'You are an elite competitive programmer. The user gives a question (may have OCR typos).\n' +
-  '1. Understand the problem, correct any OCR errors.\n' +
-  '2. Give the optimal solution with clean, commented code.\n' +
-  '3. Briefly explain approach + time/space complexity.\n' +
-  '4. Mention alternatives if relevant.\n' +
-  'Format: markdown with fenced code blocks.';
+  'You are an expert at solving both coding problems and multiple choice questions. The user gives a question captured via OCR (may have typos).\n\n' +
+  'STEP 1 — Identify the question type:\n' +
+  '- MCQ: Has options like A/B/C/D or 1/2/3/4 or (a)(b)(c)(d) or "which of the following"\n' +
+  '- CODING: Asks to write a function, algorithm, or program\n' +
+  '- THEORY: Asks to explain a concept\n\n' +
+  'STEP 2 — Respond based on type:\n\n' +
+  'If MCQ:\n' +
+  '  - Start with: ✅ Answer: [Option letter/number] — [option text]\n' +
+  '  - Then 2-3 sentences explaining WHY that option is correct\n' +
+  '  - Then briefly explain why the OTHER options are wrong (1 line each)\n' +
+  '  - If multiple options are correct, list all correct ones\n\n' +
+  'If CODING:\n' +
+  '  - Give the optimal solution with clean, commented code\n' +
+  '  - Explain approach + time/space complexity\n' +
+  '  - Mention alternatives if relevant\n\n' +
+  'If THEORY:\n' +
+  '  - Give a clear, concise explanation\n' +
+  '  - Use examples if helpful\n\n' +
+  'Always correct OCR errors and garbled text before answering.\n' +
+  'Format: markdown with fenced code blocks for code.';
 
 const VOICE_SYSTEM =
   'You are a senior software engineer in a live interview. Answer like a human speaking out loud.\n' +
@@ -133,13 +147,34 @@ const DEFAULT_HINT = 'S:snap  A:add-page  V:voice  R:reset  W:hide  E:opacity  M
 function send(ch, ...a) { if (mainWindow?.webContents) mainWindow.webContents.send(ch, ...a); }
 
 // ─── Screenshot → OCR ────────────────────────────────────────────────────────
+async function takeScreenshot(imgPath) {
+  // Use Electron desktopCapturer — no external bat/exe/screenshot-desktop needed
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.size;
+
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width, height },
+  });
+
+  if (!sources || sources.length === 0) throw new Error('No screen sources found.');
+
+  // Pick primary screen
+  const primary = sources.find(s =>
+    s.name === 'Entire Screen' || s.name === 'Screen 1' || s.id.startsWith('screen:0')
+  ) || sources[0];
+
+  const pngBuffer = primary.thumbnail.toPNG();
+  fs.writeFileSync(imgPath, pngBuffer);
+}
+
 async function snapAndOCR(label) {
   send('status', label || 'Capturing…');
   mainWindow.hide();
-  await new Promise(r => setTimeout(r, 280));
+  await new Promise(r => setTimeout(r, 300));
   const imgPath = path.join(os.tmpdir(), `gc_${Date.now()}.png`);
   try {
-    await screenshot({ filename: imgPath });
+    await takeScreenshot(imgPath);
     mainWindow.show();
     send('status', 'Running OCR…');
     return await runOCR(imgPath);
@@ -208,11 +243,17 @@ function reset() {
   stage = 0; send('reset'); send('hint', DEFAULT_HINT);
 }
 
-function cycleOpacity() {
-  opacityIdx = (opacityIdx + 1) % OPACITY_STEPS.length;
-  // Send CSS opacity to renderer — window stays at 1.0 so events always fire
+function increaseOpacity() {
+  if (opacityIdx > 0) opacityIdx--;
   send('set-opacity', OPACITY_STEPS[opacityIdx]);
-  send('hint', `Opacity: ${Math.round(OPACITY_STEPS[opacityIdx] * 100)}% — E to cycle`);
+  send('hint', `Opacity: ${Math.round(OPACITY_STEPS[opacityIdx] * 100)}% — E increase / F decrease`);
+  setTimeout(() => send('hint', DEFAULT_HINT), 1800);
+}
+
+function decreaseOpacity() {
+  if (opacityIdx < OPACITY_STEPS.length - 1) opacityIdx++;
+  send('set-opacity', OPACITY_STEPS[opacityIdx]);
+  send('hint', `Opacity: ${Math.round(OPACITY_STEPS[opacityIdx] * 100)}% — E increase / F decrease`);
   setTimeout(() => send('hint', DEFAULT_HINT), 1800);
 }
 
@@ -270,7 +311,8 @@ function createWindow() {
     if (visible) { windowPos = mainWindow.getPosition(); send('hide-ui'); mainWindow.hide(); visible = false; }
     else { mainWindow.show(); if (windowPos) mainWindow.setPosition(windowPos[0], windowPos[1]); if (stage===2) send('show-ui'); else send('hint', DEFAULT_HINT); visible = true; }
   });
-  globalShortcut.register('CommandOrControl+Shift+E', () => cycleOpacity());
+  globalShortcut.register('CommandOrControl+Shift+E', () => increaseOpacity());
+  globalShortcut.register('CommandOrControl+Shift+F', () => decreaseOpacity());
   globalShortcut.register('CommandOrControl+Shift+M', () => {
     if (mainWindow.getSize()[1] > 40) { mainWindow.setSize(mainWindow.getSize()[0], 32); send('minimize-ui'); }
     else { mainWindow.setSize(900, 650); send('restore-ui'); }
